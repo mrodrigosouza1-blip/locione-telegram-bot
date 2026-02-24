@@ -186,11 +186,22 @@ bot.command("broadcast", async (ctx) => {
   let ok = 0;
   let fail = 0;
 
-  // Rate limit simples: 25 msg/s (Telegram tolera; mantemos conservador)
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url("🍎 iOS (App Store)", LINKS.finance_ios)],
+    [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
+    [Markup.button.url("🌐 Site", LINKS.site)],
+    [Markup.button.url("📣 Canal", LINKS.canal)],
+  ]);
+
+  // Rate limit conservador
   for (let i = 0; i < subs.length; i++) {
     const chatId = subs[i].chat_id;
     try {
-      await bot.telegram.sendMessage(chatId, msg, { disable_web_page_preview: true });
+      await bot.telegram.sendMessage(chatId, msg, {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        ...kb,
+      });
       ok++;
     } catch (e) {
       fail++;
@@ -199,7 +210,7 @@ bot.command("broadcast", async (ctx) => {
   }
 
   return ctx.reply(`✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`);
-});
+});    
 
 // ===== Botões =====
 bot.action("app_finance", (ctx) => showFinance(ctx));
