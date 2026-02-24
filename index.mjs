@@ -1,43 +1,69 @@
 import { Telegraf, Markup } from "telegraf";
 import "dotenv/config";
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
-
-// ===== Persistência simples =====
-const DATA_DIR = process.cwd();
-const STATS_FILE = path.join(DATA_DIR, "stats.json");
-const SUBS_FILE = path.join(DATA_DIR, "subscribers.json");
-
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error("❌ BOT_TOKEN não definido. Configure em Railway → Variables.");
+  process.exit(1);
 }
-function writeJson(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
-}
+
+// ===== Persistência (Railway Volume montado em /data) =====
+const DATA_DIR = process.env.RAILWAY_ENVIRONMENT ? "/data" : path.join(process.cwd(), ".data");
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, "bot.sqlite");
+
+// ===== Admin (para /broadcast) =====
+// Defina ADMIN_CHAT_ID nas Variables do Railway (seu chat id).
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? Number(process.env.ADMIN_CHAT_ID) : null;
+
+// ===== SQLite =====
+const db = new Database(DB_PATH);
+db.pragma("journal_mode = WAL");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stats (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS subscribers (
+    chat_id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+const stmtInc = db.prepare(`
+  INSERT INTO stats (key, value) VALUES (?, 1)
+  ON CONFLICT(key) DO UPDATE SET value = value + 1
+`);
+const stmtGetAllStats = db.prepare(`SELECT key, value FROM stats ORDER BY value DESC`);
+const stmtSubAdd = db.prepare(`INSERT OR IGNORE INTO subscribers(chat_id) VALUES (?)`);
+const stmtSubCount = db.prepare(`SELECT COUNT(*) as c FROM subscribers`);
+const stmtSubRemove = db.prepare(`DELETE FROM subscribers WHERE chat_id = ?`);
+const stmtSubsAll = db.prepare(`SELECT chat_id FROM subscribers ORDER BY created_at ASC`);
 
 function incStat(key) {
-  const stats = readJson(STATS_FILE, {});
-  stats[key] = (stats[key] || 0) + 1;
-  writeJson(STATS_FILE, stats);
+  try { stmtInc.run(key); } catch (e) { console.error("incStat error:", e); }
 }
-
 function addSubscriber(chatId) {
-  const subs = readJson(SUBS_FILE, { chat_ids: [] });
-  if (!subs.chat_ids.includes(chatId)) {
-    subs.chat_ids.push(chatId);
-    writeJson(SUBS_FILE, subs);
-    return true;
-  }
-  return false;
+  const res = stmtSubAdd.run(chatId);
+  return res.changes > 0;
+}
+function removeSubscriber(chatId) {
+  const res = stmtSubRemove.run(chatId);
+  return res.changes > 0;
+}
+function getStatsText() {
+  const rows = stmtGetAllStats.all();
+  const subs = stmtSubCount.get().c;
+  const lines = rows.map((r) => `• ${r.key}: ${r.value}`);
+  return `📊 *Stats*\n\n${lines.length ? lines.join("\n") : "Sem dados ainda."}\n\n👥 inscritos: ${subs}`;
 }
 
-// ===== Links =====
+// ===== Links (com UTM) =====
 const LINKS = {
   finance_ios: "https://apps.apple.com/it/app/locione-finance/id6758838032",
   desk_download: "https://locione.com/download?utm_source=telegram&utm_medium=bot&utm_campaign=locione_desk",
@@ -45,7 +71,9 @@ const LINKS = {
   canal: "https://t.me/locione_app",
 };
 
-// ===== Menu =====
+// ===== Bot =====
+const bot = new Telegraf(BOT_TOKEN);
+
 function mainMenu() {
   return Markup.inlineKeyboard([
     [Markup.button.callback("📱 LociOne Finance", "app_finance")],
@@ -56,7 +84,6 @@ function mainMenu() {
   ]);
 }
 
-// ===== Helper seguro =====
 async function safeEditOrReply(ctx, text, extra) {
   try {
     if (ctx.update?.callback_query) {
@@ -67,7 +94,6 @@ async function safeEditOrReply(ctx, text, extra) {
   return ctx.reply(text, extra);
 }
 
-// ===== Telas =====
 async function showFinance(ctx) {
   incStat("open_finance");
   const text =
@@ -104,7 +130,7 @@ async function showDesk(ctx) {
   return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb });
 }
 
-// ===== Start =====
+// ===== /start =====
 bot.start(async (ctx) => {
   incStat("start");
   const payload = (ctx.startPayload || "").trim();
@@ -118,21 +144,74 @@ bot.start(async (ctx) => {
   );
 });
 
-// ===== Ações =====
+// ===== Comandos (agora vão funcionar) =====
+bot.command("finance", (ctx) => showFinance(ctx));
+bot.command("desk", (ctx) => showDesk(ctx));
+bot.command("site", (ctx) => ctx.reply(`🌐 Site oficial: ${LINKS.site}`));
+bot.command("canal", (ctx) => ctx.reply(`📣 Canal de novidades: ${LINKS.canal}`));
+bot.command("stats", (ctx) => ctx.reply(getStatsText(), { parse_mode: "Markdown" }));
+
+bot.command("subscribe", (ctx) => {
+  const ok = addSubscriber(ctx.chat.id);
+  incStat(ok ? "sub_new_cmd" : "sub_existing_cmd");
+  return ctx.reply(ok ? "✅ Inscrito nas novidades." : "✅ Você já está inscrito.");
+});
+
+bot.command("unsubscribe", (ctx) => {
+  const ok = removeSubscriber(ctx.chat.id);
+  incStat(ok ? "sub_removed_cmd" : "sub_removed_noop_cmd");
+  return ctx.reply(ok ? "🛑 Inscrição removida." : "Você não estava inscrito.");
+});
+
+// ===== Descobrir seu chat_id =====
+bot.command("myid", (ctx) => {
+  const id = ctx.chat?.id;
+  return ctx.reply(`🆔 Seu chat_id: ${id}`);
+});
+
+// ===== Broadcast (admin-only) =====
+// Uso: /broadcast Texto...
+bot.command("broadcast", async (ctx) => {
+  if (!ADMIN_CHAT_ID || ctx.chat.id !== ADMIN_CHAT_ID) {
+    return ctx.reply("⛔ Comando restrito ao admin.");
+  }
+
+  const text = ctx.message?.text || "";
+  const msg = text.replace(/^\/broadcast\s*/i, "").trim();
+  if (!msg) return ctx.reply("Uso: /broadcast sua mensagem aqui");
+
+  incStat("broadcast_sent");
+
+  const subs = stmtSubsAll.all();
+  let ok = 0;
+  let fail = 0;
+
+  // Rate limit simples: 25 msg/s (Telegram tolera; mantemos conservador)
+  for (let i = 0; i < subs.length; i++) {
+    const chatId = subs[i].chat_id;
+    try {
+      await bot.telegram.sendMessage(chatId, msg, { disable_web_page_preview: true });
+      ok++;
+    } catch (e) {
+      fail++;
+    }
+    if (i % 25 === 0) await new Promise((r) => setTimeout(r, 1100));
+  }
+
+  return ctx.reply(`✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`);
+});
+
+// ===== Botões =====
 bot.action("app_finance", (ctx) => showFinance(ctx));
 bot.action("app_desk", (ctx) => showDesk(ctx));
 
 bot.action("sub_on", async (ctx) => {
   const ok = addSubscriber(ctx.chat.id);
   incStat(ok ? "sub_new" : "sub_existing");
-  try {
-    await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅");
-  } catch {}
+  try { await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅"); } catch {}
   return safeEditOrReply(
     ctx,
-    ok
-      ? "✅ Pronto! Você vai receber novidades da LociOne."
-      : "ℹ️ Você já estava inscrito nas novidades.",
+    ok ? "✅ Pronto! Você vai receber novidades da LociOne." : "ℹ️ Você já estava inscrito.",
     { ...mainMenu() }
   );
 });
@@ -145,6 +224,17 @@ bot.action("back", async (ctx) => {
   }
 });
 
-// ===== Start =====
-bot.launch();
-console.log("🤖 LociOne Bot rodando...");
+// Robustez
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
+bot.catch((err) => console.error("Bot error:", err));
+
+(async () => {
+  console.log("🤖 LociOne Bot iniciando...");
+  console.log("DB_PATH:", DB_PATH);
+  await bot.launch();
+  console.log("🤖 LociOne Bot rodando...");
+})();
+
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
