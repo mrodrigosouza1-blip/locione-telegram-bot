@@ -1,9 +1,0 @@
-{
-  "name": "locione-telegram-bot",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "engines": { "node": "20.x" },
-  "scripts": { "start": "node index.mjs" },
-  ...
-}
