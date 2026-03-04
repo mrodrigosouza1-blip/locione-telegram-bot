@@ -65,6 +65,7 @@ function getStatsText() {
 
 // ===== Links (com UTM) =====
 const LINKS = {
+  office_ios: "https://apps.apple.com/br/app/locione-office/id6759913632",
   finance_ios: "https://apps.apple.com/it/app/locione-finance/id6758838032",
   desk_download: "https://locione.com/download?utm_source=telegram&utm_medium=bot&utm_campaign=locione_desk",
   site: "https://locione.com?utm_source=telegram&utm_medium=bot&utm_campaign=locione_site",
@@ -76,7 +77,16 @@ const bot = new Telegraf(BOT_TOKEN);
 
 function mainMenu() {
   return Markup.inlineKeyboard([
+    [Markup.button.callback("📱 LociOne Finance", "app_finance")],function mainMenu() {
+  return Markup.inlineKeyboard([
     [Markup.button.callback("📱 LociOne Finance", "app_finance")],
+    [Markup.button.callback("🏢 LociOne Office", "app_office")],
+    [Markup.button.callback("💻 LociOne Desk", "app_desk")],
+    [Markup.button.url("🌐 Site oficial", LINKS.site)],
+    [Markup.button.url("📣 Canal de novidades", LINKS.canal)],
+    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
+  ]);
+}
     [Markup.button.callback("💻 LociOne Desk", "app_desk")],
     [Markup.button.url("🌐 Site oficial", LINKS.site)],
     [Markup.button.url("📣 Canal de novidades", LINKS.canal)],
@@ -94,7 +104,30 @@ async function safeEditOrReply(ctx, text, extra) {
   return ctx.reply(text, extra);
 }
 
-async function showFinance(ctx) {
+async function showOffice(ctx) {
+  incStat("open_office");
+  const text =
+    "*LociOne Office 🏢*\n\n" +
+    "• Gestão simples para MEI/pequenos negócios\n" +
+    "• Offline-first (dados no aparelho)\n" +
+    "• Lançamentos, clientes, produtos e mais\n\n" +
+    "Baixe no iOS:";
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url("🍎 App Store (iOS)", LINKS.office_ios)],
+    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
+    [Markup.button.callback("⬅️ Voltar", "back")],
+  ]);
+
+  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb });
+}
+async function showFinance(ctx) {const kb = Markup.inlineKeyboard([
+  [Markup.button.url("🍎 iOS (Finance)", LINKS.finance_ios)],
+  [Markup.button.url("🏢 iOS (Office)", LINKS.office_ios)],
+  [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
+  [Markup.button.url("🌐 Site", LINKS.site)],
+  [Markup.button.url("📣 Canal", LINKS.canal)],
+]);
   incStat("open_finance");
   const text =
     "*LociOne Finance 📱*\n\n" +
@@ -136,6 +169,7 @@ bot.start(async (ctx) => {
   const payload = (ctx.startPayload || "").trim();
 
   if (payload === "finance") return showFinance(ctx);
+  if (payload === "office") return showOffice(ctx);
   if (payload === "desk") return showDesk(ctx);
 
   return ctx.reply(
@@ -146,6 +180,7 @@ bot.start(async (ctx) => {
 
 // ===== Comandos (agora vão funcionar) =====
 bot.command("finance", (ctx) => showFinance(ctx));
+bot.command("office", (ctx) => showOffice(ctx));
 bot.command("desk", (ctx) => showDesk(ctx));
 bot.command("site", (ctx) => ctx.reply(`🌐 Site oficial: ${LINKS.site}`));
 bot.command("canal", (ctx) => ctx.reply(`📣 Canal de novidades: ${LINKS.canal}`));
@@ -214,6 +249,7 @@ bot.command("broadcast", async (ctx) => {
 
 // ===== Botões =====
 bot.action("app_finance", (ctx) => showFinance(ctx));
+bot.action("app_office", (ctx) => showOffice(ctx));
 bot.action("app_desk", (ctx) => showDesk(ctx));
 
 bot.action("sub_on", async (ctx) => {
