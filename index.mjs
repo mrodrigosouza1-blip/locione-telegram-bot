@@ -15,8 +15,9 @@ const DATA_DIR = process.env.RAILWAY_ENVIRONMENT ? "/data" : path.join(process.c
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, "bot.sqlite");
 
-// ===== Admin (para /broadcast e /postcanal) =====
+// ===== Admin =====
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? Number(process.env.ADMIN_CHAT_ID) : null;
+const CHANNEL_USERNAME = "@locione_app";
 
 // ===== SQLite =====
 const db = new Database(DB_PATH);
@@ -65,6 +66,9 @@ function getStatsText() {
   const lines = rows.map((r) => `• ${r.key}: ${r.value}`);
   return `📊 *Stats*\n\n${lines.length ? lines.join("\n") : "Sem dados ainda."}\n\n👥 inscritos: ${subs}`;
 }
+function isAdmin(ctx) {
+  return !!ADMIN_CHAT_ID && ctx.chat?.id === ADMIN_CHAT_ID;
+}
 
 // ===== Links (com UTM) =====
 const LINKS = {
@@ -79,7 +83,7 @@ const LINKS = {
 // ===== Bot =====
 const bot = new Telegraf(BOT_TOKEN);
 
-// ===== Teclado fixo (sem digitar) =====
+// ===== Teclado fixo (tap-only) =====
 function persistentKeyboard() {
   return Markup.keyboard([
     ["📱 Finance", "🏢 Office"],
@@ -128,7 +132,12 @@ async function showFinance(ctx) {
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    ...kb,
+    ...persistentKeyboard(),
+  });
 }
 
 async function showOffice(ctx) {
@@ -147,7 +156,12 @@ async function showOffice(ctx) {
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    ...kb,
+    ...persistentKeyboard(),
+  });
 }
 
 async function showDesk(ctx) {
@@ -166,7 +180,12 @@ async function showDesk(ctx) {
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    ...kb,
+    ...persistentKeyboard(),
+  });
 }
 
 // ===== /start =====
@@ -178,19 +197,22 @@ bot.start(async (ctx) => {
   if (payload === "office") return showOffice(ctx);
   if (payload === "desk") return showDesk(ctx);
 
-  return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app que você quer conhecer:", {
+  return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app:", {
     parse_mode: "Markdown",
     ...mainMenu(),
     ...persistentKeyboard(),
   });
 });
 
-// ===== Comandos (ainda funcionam) =====
+// ===== Comandos (user) =====
 bot.command("finance", (ctx) => showFinance(ctx));
 bot.command("office", (ctx) => showOffice(ctx));
 bot.command("desk", (ctx) => showDesk(ctx));
 bot.command("site", (ctx) =>
-  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
+  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, {
+    disable_web_page_preview: true,
+    ...persistentKeyboard(),
+  })
 );
 bot.command("canal", (ctx) => ctx.reply(`📣 Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
 bot.command("stats", (ctx) => ctx.reply(getStatsText(), { parse_mode: "Markdown" }));
@@ -213,12 +235,82 @@ bot.command("unsubscribe", (ctx) => {
 
 bot.command("myid", (ctx) => ctx.reply(`🆔 Seu chat_id: ${ctx.chat?.id}`));
 
-// ===== Teclado fixo (hears) — 100% tap-only =====
+// ===== Admin: /admin =====
+bot.command("admin", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const subs = stmtSubCount.get().c;
+  const text =
+    `🛠️ *Admin LociOne*\n\n` +
+    `👥 Inscritos: *${subs}*\n\n` +
+    `Comandos:\n` +
+    `• /postcanal texto...\n` +
+    `• /broadcast texto...\n` +
+    `• /lancamento finance|office|desk\n` +
+    `• /stats`;
+  return ctx.reply(text, { parse_mode: "Markdown" });
+});
+
+// ===== Admin: /lancamento =====
+function launchMessage(kind) {
+  if (kind === "finance") {
+    return (
+      "🚀 *Lançamento LociOne*\n\n" +
+      "📱 *LociOne Finance (iOS)*\n" +
+      "Controle financeiro offline-first.\n\n" +
+      "🍎 Baixe no iOS:\n" +
+      LINKS.finance_ios
+    );
+  }
+  if (kind === "office") {
+    return (
+      "🚀 *Lançamento LociOne*\n\n" +
+      "🏢 *LociOne Office (iOS)*\n" +
+      "Gestão simples para MEI/pequenos negócios.\n\n" +
+      "🍎 Baixe no iOS:\n" +
+      LINKS.office_ios
+    );
+  }
+  if (kind === "desk") {
+    return (
+      "🚀 *Lançamento LociOne*\n\n" +
+      "💻 *LociOne Desk*\n" +
+      "Versão desktop com foco em produtividade e privacidade.\n\n" +
+      "💻 Download:\n" +
+      LINKS.desk_download
+    );
+  }
+  return null;
+}
+
+bot.command("lancamento", async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+
+  const text = ctx.message?.text || "";
+  const arg = text.replace(/^\/lancamento\s*/i, "").trim().toLowerCase();
+  if (!["finance", "office", "desk"].includes(arg)) {
+    return ctx.reply("Uso: /lancamento finance | office | desk");
+  }
+
+  const msg = launchMessage(arg);
+  incStat(`launch_${arg}`);
+
+  await bot.telegram.sendMessage(CHANNEL_USERNAME, msg, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+  });
+
+  return ctx.reply(`✅ Lançamento postado no canal (${arg}).`);
+});
+
+// ===== Teclado fixo (hears) — tap-only =====
 bot.hears("📱 Finance", (ctx) => showFinance(ctx));
 bot.hears("🏢 Office", (ctx) => showOffice(ctx));
 bot.hears("💻 Desk", (ctx) => showDesk(ctx));
 bot.hears("🌐 Site", (ctx) =>
-  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
+  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, {
+    disable_web_page_preview: true,
+    ...persistentKeyboard(),
+  })
 );
 bot.hears("📣 Canal", (ctx) => ctx.reply(`📣 Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
 bot.hears("🔔 Novidades", (ctx) => {
@@ -229,31 +321,26 @@ bot.hears("🔔 Novidades", (ctx) => {
   });
 });
 
-// ===== Postar no canal (admin-only) =====
-// Uso: /postcanal sua mensagem aqui
+// ===== Admin: /postcanal =====
 bot.command("postcanal", async (ctx) => {
-  if (!ADMIN_CHAT_ID || ctx.chat.id !== ADMIN_CHAT_ID) {
-    return ctx.reply("⛔ Comando restrito ao admin.");
-  }
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Comando restrito ao admin.");
 
   const text = ctx.message?.text || "";
   const msg = text.replace(/^\/postcanal\s*/i, "").trim();
   if (!msg) return ctx.reply("Uso: /postcanal sua mensagem aqui");
 
-  await bot.telegram.sendMessage("@locione_app", msg, {
+  await bot.telegram.sendMessage(CHANNEL_USERNAME, msg, {
     parse_mode: "Markdown",
     disable_web_page_preview: true,
   });
 
   incStat("post_canal");
-  return ctx.reply("✅ Postado no canal @locione_app.", { ...persistentKeyboard() });
+  return ctx.reply(`✅ Postado no canal ${CHANNEL_USERNAME}.`, { ...persistentKeyboard() });
 });
 
-// ===== Broadcast (admin-only) com botões 1 coluna =====
+// ===== Admin: /broadcast =====
 bot.command("broadcast", async (ctx) => {
-  if (!ADMIN_CHAT_ID || ctx.chat.id !== ADMIN_CHAT_ID) {
-    return ctx.reply("⛔ Comando restrito ao admin.");
-  }
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Comando restrito ao admin.");
 
   const text = ctx.message?.text || "";
   const msg = text.replace(/^\/broadcast\s*/i, "").trim();
@@ -288,13 +375,10 @@ bot.command("broadcast", async (ctx) => {
     if (i % 25 === 0) await new Promise((r) => setTimeout(r, 1100));
   }
 
-  return ctx.reply(
-    `✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`,
-    { ...persistentKeyboard() }
-  );
+  return ctx.reply(`✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`);
 });
 
-// ===== Botões =====
+// ===== Inline Buttons =====
 bot.action("app_finance", (ctx) => showFinance(ctx));
 bot.action("app_office", (ctx) => showOffice(ctx));
 bot.action("app_desk", (ctx) => showDesk(ctx));
@@ -314,9 +398,9 @@ bot.action("sub_on", async (ctx) => {
 
 bot.action("back", async (ctx) => {
   try {
-    await ctx.editMessageText("Escolha o app que você quer conhecer:", mainMenu());
+    await ctx.editMessageText("Escolha o app:", mainMenu());
   } catch {
-    await ctx.reply("Escolha o app que você quer conhecer:", { ...mainMenu(), ...persistentKeyboard() });
+    await ctx.reply("Escolha o app:", { ...mainMenu(), ...persistentKeyboard() });
   }
 });
 
