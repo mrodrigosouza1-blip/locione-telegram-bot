@@ -6,7 +6,7 @@ import path from "node:path";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
-  console.error("❌ BOT_TOKEN não definido. Configure em Railway → Variables.");
+  console.error("❌ BOT_TOKEN não definido. Configure no Railway → Variables.");
   process.exit(1);
 }
 
@@ -16,7 +16,6 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, "bot.sqlite");
 
 // ===== Admin (para /broadcast) =====
-// Defina ADMIN_CHAT_ID nas Variables do Railway (seu chat id).
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? Number(process.env.ADMIN_CHAT_ID) : null;
 
 // ===== SQLite =====
@@ -46,7 +45,11 @@ const stmtSubRemove = db.prepare(`DELETE FROM subscribers WHERE chat_id = ?`);
 const stmtSubsAll = db.prepare(`SELECT chat_id FROM subscribers ORDER BY created_at ASC`);
 
 function incStat(key) {
-  try { stmtInc.run(key); } catch (e) { console.error("incStat error:", e); }
+  try {
+    stmtInc.run(key);
+  } catch (e) {
+    console.error("incStat error:", e);
+  }
 }
 function addSubscriber(chatId) {
   const res = stmtSubAdd.run(chatId);
@@ -65,9 +68,10 @@ function getStatsText() {
 
 // ===== Links (com UTM) =====
 const LINKS = {
-  office_ios: "https://apps.apple.com/br/app/locione-office/id6759913632",
   finance_ios: "https://apps.apple.com/it/app/locione-finance/id6758838032",
-  desk_download: "https://locione.com/download?utm_source=telegram&utm_medium=bot&utm_campaign=locione_desk",
+  office_ios: "https://apps.apple.com/br/app/locione-office/id6759913632",
+  desk_download:
+    "https://locione.com/download?utm_source=telegram&utm_medium=bot&utm_campaign=locione_desk",
   site: "https://locione.com?utm_source=telegram&utm_medium=bot&utm_campaign=locione_site",
   canal: "https://t.me/locione_app",
 };
@@ -77,23 +81,16 @@ const bot = new Telegraf(BOT_TOKEN);
 
 function mainMenu() {
   return Markup.inlineKeyboard([
-    [Markup.button.callback("📱 LociOne Finance", "app_finance")],function mainMenu() {
-  return Markup.inlineKeyboard([
     [Markup.button.callback("📱 LociOne Finance", "app_finance")],
     [Markup.button.callback("🏢 LociOne Office", "app_office")],
     [Markup.button.callback("💻 LociOne Desk", "app_desk")],
     [Markup.button.url("🌐 Site oficial", LINKS.site)],
-    [Markup.button.url("📣 Canal de novidades", LINKS.canal)],
-    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
-  ]);
-}
-    [Markup.button.callback("💻 LociOne Desk", "app_desk")],
-    [Markup.button.url("🌐 Site oficial", LINKS.site)],
-    [Markup.button.url("📣 Canal de novidades", LINKS.canal)],
+    [Markup.button.url("📣 Canal", LINKS.canal)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
   ]);
 }
 
+// Evita 400 "message can't be edited"
 async function safeEditOrReply(ctx, text, extra) {
   try {
     if (ctx.update?.callback_query) {
@@ -104,30 +101,7 @@ async function safeEditOrReply(ctx, text, extra) {
   return ctx.reply(text, extra);
 }
 
-async function showOffice(ctx) {
-  incStat("open_office");
-  const text =
-    "*LociOne Office 🏢*\n\n" +
-    "• Gestão simples para MEI/pequenos negócios\n" +
-    "• Offline-first (dados no aparelho)\n" +
-    "• Lançamentos, clientes, produtos e mais\n\n" +
-    "Baixe no iOS:";
-
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.url("🍎 App Store (iOS)", LINKS.office_ios)],
-    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
-    [Markup.button.callback("⬅️ Voltar", "back")],
-  ]);
-
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb });
-}
-async function showFinance(ctx) {const kb = Markup.inlineKeyboard([
-  [Markup.button.url("🍎 iOS (Finance)", LINKS.finance_ios)],
-  [Markup.button.url("🏢 iOS (Office)", LINKS.office_ios)],
-  [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
-  [Markup.button.url("🌐 Site", LINKS.site)],
-  [Markup.button.url("📣 Canal", LINKS.canal)],
-]);
+async function showFinance(ctx) {
   incStat("open_finance");
   const text =
     "*LociOne Finance 📱*\n\n" +
@@ -137,7 +111,25 @@ async function showFinance(ctx) {const kb = Markup.inlineKeyboard([
     "Baixe no iOS:";
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("🍎 App Store (iOS)", LINKS.finance_ios)],
+    [Markup.button.url("🍎 iOS (App Store)", LINKS.finance_ios)],
+    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
+    [Markup.button.callback("⬅️ Voltar", "back")],
+  ]);
+
+  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb });
+}
+
+async function showOffice(ctx) {
+  incStat("open_office");
+  const text =
+    "*LociOne Office 🏢*\n\n" +
+    "• Gestão para MEI/pequenos negócios\n" +
+    "• Offline-first (dados no aparelho)\n" +
+    "• Lançamentos, clientes, produtos e mais\n\n" +
+    "Baixe no iOS:";
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url("🍎 iOS (App Store)", LINKS.office_ios)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
@@ -155,7 +147,7 @@ async function showDesk(ctx) {
     "Faça o download:";
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("💻 Download Desktop", LINKS.desk_download)],
+    [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
@@ -172,18 +164,18 @@ bot.start(async (ctx) => {
   if (payload === "office") return showOffice(ctx);
   if (payload === "desk") return showDesk(ctx);
 
-  return ctx.reply(
-    "👋 *Bem-vindo à LociOne!*\n\nEscolha o app que você quer conhecer:",
-    { parse_mode: "Markdown", ...mainMenu() }
-  );
+  return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app que você quer conhecer:", {
+    parse_mode: "Markdown",
+    ...mainMenu(),
+  });
 });
 
-// ===== Comandos (agora vão funcionar) =====
+// ===== Comandos =====
 bot.command("finance", (ctx) => showFinance(ctx));
 bot.command("office", (ctx) => showOffice(ctx));
 bot.command("desk", (ctx) => showDesk(ctx));
 bot.command("site", (ctx) => ctx.reply(`🌐 Site oficial: ${LINKS.site}`));
-bot.command("canal", (ctx) => ctx.reply(`📣 Canal de novidades: ${LINKS.canal}`));
+bot.command("canal", (ctx) => ctx.reply(`📣 Canal: ${LINKS.canal}`));
 bot.command("stats", (ctx) => ctx.reply(getStatsText(), { parse_mode: "Markdown" }));
 
 bot.command("subscribe", (ctx) => {
@@ -198,14 +190,9 @@ bot.command("unsubscribe", (ctx) => {
   return ctx.reply(ok ? "🛑 Inscrição removida." : "Você não estava inscrito.");
 });
 
-// ===== Descobrir seu chat_id =====
-bot.command("myid", (ctx) => {
-  const id = ctx.chat?.id;
-  return ctx.reply(`🆔 Seu chat_id: ${id}`);
-});
+bot.command("myid", (ctx) => ctx.reply(`🆔 Seu chat_id: ${ctx.chat?.id}`));
 
-// ===== Broadcast (admin-only) =====
-// Uso: /broadcast Texto...
+// ===== Broadcast (admin-only) com botões 1 coluna =====
 bot.command("broadcast", async (ctx) => {
   if (!ADMIN_CHAT_ID || ctx.chat.id !== ADMIN_CHAT_ID) {
     return ctx.reply("⛔ Comando restrito ao admin.");
@@ -222,13 +209,13 @@ bot.command("broadcast", async (ctx) => {
   let fail = 0;
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("🍎 iOS (App Store)", LINKS.finance_ios)],
+    [Markup.button.url("🍎 iOS (Finance)", LINKS.finance_ios)],
+    [Markup.button.url("🏢 iOS (Office)", LINKS.office_ios)],
     [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
     [Markup.button.url("🌐 Site", LINKS.site)],
     [Markup.button.url("📣 Canal", LINKS.canal)],
   ]);
 
-  // Rate limit conservador
   for (let i = 0; i < subs.length; i++) {
     const chatId = subs[i].chat_id;
     try {
@@ -238,14 +225,14 @@ bot.command("broadcast", async (ctx) => {
         ...kb,
       });
       ok++;
-    } catch (e) {
+    } catch {
       fail++;
     }
     if (i % 25 === 0) await new Promise((r) => setTimeout(r, 1100));
   }
 
   return ctx.reply(`✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`);
-});    
+});
 
 // ===== Botões =====
 bot.action("app_finance", (ctx) => showFinance(ctx));
@@ -255,7 +242,9 @@ bot.action("app_desk", (ctx) => showDesk(ctx));
 bot.action("sub_on", async (ctx) => {
   const ok = addSubscriber(ctx.chat.id);
   incStat(ok ? "sub_new" : "sub_existing");
-  try { await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅"); } catch {}
+  try {
+    await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅");
+  } catch {}
   return safeEditOrReply(
     ctx,
     ok ? "✅ Pronto! Você vai receber novidades da LociOne." : "ℹ️ Você já estava inscrito.",
