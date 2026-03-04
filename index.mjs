@@ -16,6 +16,7 @@ if (!BOT_TOKEN) {
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? Number(process.env.ADMIN_CHAT_ID) : null;
 const CHANNEL_USERNAME = "@locione_app";
 const TZ = "Europe/Rome";
+const PIN_AUTO = String(process.env.PIN_AUTO || "0") === "1";
 
 // Persistência (Railway Volume montado em /data)
 const DATA_DIR = process.env.RAILWAY_ENVIRONMENT ? "/data" : path.join(process.cwd(), ".data");
@@ -62,6 +63,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_scheduled_posts_pending
     ON scheduled_posts(status, run_at_rome);
+
+  CREATE TABLE IF NOT EXISTS channel_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_username TEXT NOT NULL,
+    channel_chat_id INTEGER,
+    message_id INTEGER NOT NULL,
+    kind TEXT,
+    source TEXT NOT NULL, -- post|lancamento|postcanal|schedule
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_channel_posts_created
+    ON channel_posts(created_at DESC);
 `);
 
 const stmtInc = db.prepare(`
@@ -107,6 +121,17 @@ const stmtSchedCancel = db.prepare(`
   UPDATE scheduled_posts
   SET status='canceled'
   WHERE id=? AND status='pending'
+`);
+
+const stmtChanPostInsert = db.prepare(`
+  INSERT INTO channel_posts (channel_username, channel_chat_id, message_id, kind, source)
+  VALUES (?, ?, ?, ?, ?)
+`);
+const stmtChanLast = db.prepare(`
+  SELECT channel_username, channel_chat_id, message_id, kind, source, created_at
+  FROM channel_posts
+  ORDER BY id DESC
+  LIMIT 1
 `);
 
 function incStat(key) {
@@ -156,10 +181,9 @@ function nowRomeParts() {
 }
 function nowRomeStr() {
   const p = nowRomeParts();
-  return `${p.yyyy}-${p.mm}-${p.dd} ${p.hh}:${p.min}`; // lexicographically sortable
+  return `${p.yyyy}-${p.mm}-${p.dd} ${p.hh}:${p.min}`;
 }
 function isValidRunAtRome(s) {
-  // "YYYY-MM-DD HH:MM"
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s);
 }
 
@@ -278,80 +302,33 @@ async function showDesk(ctx) {
 }
 
 // =========================
-// /start
+// HELPERS: postar no canal + salvar message_id + pin opcional
 // =========================
-bot.start(async (ctx) => {
-  incStat("start");
-  const payload = (ctx.startPayload || "").trim();
-  if (payload === "finance") return showFinance(ctx);
-  if (payload === "office") return showOffice(ctx);
-  if (payload === "desk") return showDesk(ctx);
-
-  return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app:", {
-    parse_mode: "Markdown",
-    ...mainMenu(),
-    ...persistentKeyboard(),
+async function postToChannel({ text, kind = null, source = "post" }) {
+  const res = await bot.telegram.sendMessage(CHANNEL_USERNAME, text, {
+    disable_web_page_preview: true,
   });
-});
 
-// =========================
-// USER COMMANDS
-// =========================
-bot.command("finance", (ctx) => showFinance(ctx));
-bot.command("office", (ctx) => showOffice(ctx));
-bot.command("desk", (ctx) => showDesk(ctx));
-bot.command("site", (ctx) =>
-  ctx.reply(`Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
-);
-bot.command("canal", (ctx) => ctx.reply(`Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
+  // res.chat.id e res.message_id vêm aqui
+  try {
+    stmtChanPostInsert.run(CHANNEL_USERNAME, res.chat?.id || null, res.message_id, kind, source);
+  } catch (e) {
+    console.error("save channel post failed:", e);
+  }
 
-// ✅ /stats corrigido (texto puro)
-bot.command("stats", (ctx) => {
-  incStat("stats_view");
-  return ctx.reply(getStatsPlainText(), { disable_web_page_preview: true, ...persistentKeyboard() });
-});
+  if (PIN_AUTO) {
+    try {
+      await bot.telegram.pinChatMessage(res.chat.id, res.message_id, { disable_notification: true });
+      incStat("pin_auto_ok");
+    } catch (e) {
+      incStat("pin_auto_fail");
+      console.error("pin auto failed:", e?.message || e);
+    }
+  }
 
-bot.command("subscribe", (ctx) => {
-  const ok = addSubscriber(ctx.chat.id);
-  incStat(ok ? "sub_new_cmd" : "sub_existing_cmd");
-  return ctx.reply(ok ? "✅ Inscrito nas novidades." : "✅ Você já está inscrito.", { ...persistentKeyboard() });
-});
+  return res;
+}
 
-bot.command("unsubscribe", (ctx) => {
-  const ok = removeSubscriber(ctx.chat.id);
-  incStat(ok ? "sub_removed_cmd" : "sub_removed_noop_cmd");
-  return ctx.reply(ok ? "🛑 Inscrição removida." : "Você não estava inscrito.", { ...persistentKeyboard() });
-});
-
-bot.command("myid", (ctx) => ctx.reply(`Seu chat_id: ${ctx.chat?.id}`));
-
-// =========================
-// ADMIN: /admin
-// =========================
-bot.command("admin", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
-  const subs = stmtSubCount.get().c;
-  const now = nowRomeStr();
-  const text =
-    `ADMIN\n\n` +
-    `inscritos: ${subs}\n` +
-    `agora(Roma): ${now}\n\n` +
-    `comandos:\n` +
-    `- /postcanal texto...\n` +
-    `- /post finance|office|desk\n` +
-    `- /lancamento finance|office|desk\n` +
-    `- /agendar YYYY-MM-DD HH:MM finance|office|desk\n` +
-    `- /agendar YYYY-MM-DD HH:MM seu texto livre...\n` +
-    `- /agendados\n` +
-    `- /cancelar ID\n` +
-    `- /broadcast texto...\n` +
-    `- /stats`;
-  return ctx.reply(text, { ...persistentKeyboard() });
-});
-
-// =========================
-// CANAL: templates
-// =========================
 function templateFor(kind) {
   if (kind === "finance") {
     return (
@@ -392,7 +369,83 @@ function templateFor(kind) {
   return null;
 }
 
-// /post kind -> posta template no canal
+// =========================
+// /start
+// =========================
+bot.start(async (ctx) => {
+  incStat("start");
+  const payload = (ctx.startPayload || "").trim();
+  if (payload === "finance") return showFinance(ctx);
+  if (payload === "office") return showOffice(ctx);
+  if (payload === "desk") return showDesk(ctx);
+
+  return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app:", {
+    parse_mode: "Markdown",
+    ...mainMenu(),
+    ...persistentKeyboard(),
+  });
+});
+
+// =========================
+// USER COMMANDS
+// =========================
+bot.command("finance", (ctx) => showFinance(ctx));
+bot.command("office", (ctx) => showOffice(ctx));
+bot.command("desk", (ctx) => showDesk(ctx));
+bot.command("site", (ctx) =>
+  ctx.reply(`Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
+);
+bot.command("canal", (ctx) => ctx.reply(`Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
+
+bot.command("stats", (ctx) => {
+  incStat("stats_view");
+  return ctx.reply(getStatsPlainText(), { disable_web_page_preview: true, ...persistentKeyboard() });
+});
+
+bot.command("subscribe", (ctx) => {
+  const ok = addSubscriber(ctx.chat.id);
+  incStat(ok ? "sub_new_cmd" : "sub_existing_cmd");
+  return ctx.reply(ok ? "✅ Inscrito nas novidades." : "✅ Você já está inscrito.", { ...persistentKeyboard() });
+});
+
+bot.command("unsubscribe", (ctx) => {
+  const ok = removeSubscriber(ctx.chat.id);
+  incStat(ok ? "sub_removed_cmd" : "sub_removed_noop_cmd");
+  return ctx.reply(ok ? "🛑 Inscrição removida." : "Você não estava inscrito.", { ...persistentKeyboard() });
+});
+
+bot.command("myid", (ctx) => ctx.reply(`Seu chat_id: ${ctx.chat?.id}`));
+
+// =========================
+// ADMIN: /admin
+// =========================
+bot.command("admin", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const subs = stmtSubCount.get().c;
+  const now = nowRomeStr();
+  const text =
+    `ADMIN\n\n` +
+    `inscritos: ${subs}\n` +
+    `agora(Roma): ${now}\n` +
+    `pin_auto: ${PIN_AUTO ? "ON" : "OFF"}\n\n` +
+    `comandos:\n` +
+    `- /postcanal texto...\n` +
+    `- /post finance|office|desk\n` +
+    `- /lancamento finance|office|desk\n` +
+    `- /agendar YYYY-MM-DD HH:MM finance|office|desk\n` +
+    `- /agendar YYYY-MM-DD HH:MM seu texto livre...\n` +
+    `- /agendados\n` +
+    `- /cancelar ID\n` +
+    `- /pinlast\n` +
+    `- /unpinall\n` +
+    `- /broadcast texto...\n` +
+    `- /stats`;
+  return ctx.reply(text, { ...persistentKeyboard() });
+});
+
+// =========================
+// ADMIN: postar no canal
+// =========================
 bot.command("post", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   const text = ctx.message?.text || "";
@@ -401,12 +454,11 @@ bot.command("post", async (ctx) => {
     return ctx.reply("Uso: /post finance | office | desk");
   }
   const msg = templateFor(arg);
-  await bot.telegram.sendMessage(CHANNEL_USERNAME, msg, { disable_web_page_preview: true });
+  await postToChannel({ text: msg, kind: arg, source: "post" });
   incStat(`post_${arg}`);
   return ctx.reply(`✅ Postado no canal (${arg}).`);
 });
 
-// /lancamento kind -> posta template + incrementa launch_kind
 bot.command("lancamento", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   const text = ctx.message?.text || "";
@@ -415,33 +467,67 @@ bot.command("lancamento", async (ctx) => {
     return ctx.reply("Uso: /lancamento finance | office | desk");
   }
   const msg = templateFor(arg);
-  await bot.telegram.sendMessage(CHANNEL_USERNAME, msg, { disable_web_page_preview: true });
+  await postToChannel({ text: msg, kind: arg, source: "lancamento" });
   incStat(`launch_${arg}`);
   return ctx.reply(`✅ Lançamento postado no canal (${arg}).`);
 });
 
-// /postcanal texto...
 bot.command("postcanal", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   const text = ctx.message?.text || "";
   const msg = text.replace(/^\/postcanal\s*/i, "").trim();
   if (!msg) return ctx.reply("Uso: /postcanal sua mensagem aqui");
-  await bot.telegram.sendMessage(CHANNEL_USERNAME, msg, { disable_web_page_preview: true });
+  await postToChannel({ text: msg, kind: null, source: "postcanal" });
   incStat("post_canal");
   return ctx.reply(`✅ Postado no canal ${CHANNEL_USERNAME}.`);
 });
 
 // =========================
+// ADMIN: pin / unpin
+// =========================
+bot.command("pinlast", async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+
+  const last = stmtChanLast.get();
+  if (!last) return ctx.reply("Ainda não existe post salvo para fixar.");
+
+  try {
+    const chatId = last.channel_chat_id;
+    if (!chatId) return ctx.reply("Não tenho channel_chat_id salvo ainda. Poste novamente via bot e tente /pinlast.");
+
+    await bot.telegram.pinChatMessage(chatId, last.message_id, { disable_notification: true });
+    incStat("pin_last_ok");
+    return ctx.reply(`📌 Fixado o último post (msg_id: ${last.message_id}).`);
+  } catch (e) {
+    incStat("pin_last_fail");
+    return ctx.reply(`Falha ao fixar: ${String(e?.message || e)}`);
+  }
+});
+
+bot.command("unpinall", async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  try {
+    // precisamos do chat_id do canal; tenta usar o último salvo
+    const last = stmtChanLast.get();
+    const chatId = last?.channel_chat_id;
+    if (!chatId) return ctx.reply("Sem channel_chat_id salvo. Poste algo no canal via bot e tente de novo.");
+    await bot.telegram.unpinAllChatMessages(chatId);
+    incStat("unpin_all_ok");
+    return ctx.reply("🧷 Removi todos os pins do canal.");
+  } catch (e) {
+    incStat("unpin_all_fail");
+    return ctx.reply(`Falha ao remover pins: ${String(e?.message || e)}`);
+  }
+});
+
+// =========================
 // SCHEDULER
 // =========================
-// /agendar YYYY-MM-DD HH:MM finance|office|desk
-// /agendar YYYY-MM-DD HH:MM texto livre...
 bot.command("agendar", (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
 
   const full = ctx.message?.text || "";
   const rest = full.replace(/^\/agendar\s*/i, "").trim();
-  // split first 2 tokens for date and time
   const parts = rest.split(/\s+/);
   if (parts.length < 3) {
     return ctx.reply("Uso:\n/agendar YYYY-MM-DD HH:MM finance|office|desk\nou\n/agendar YYYY-MM-DD HH:MM seu texto...");
@@ -463,7 +549,7 @@ bot.command("agendar", (ctx) => {
     kind = lowerTail;
     msg = templateFor(kind);
   } else {
-    msg = tail; // texto livre
+    msg = tail;
   }
 
   stmtSchedInsert.run(runAt, kind, msg);
@@ -501,7 +587,7 @@ async function schedulerTick() {
 
   for (const row of due) {
     try {
-      await bot.telegram.sendMessage(CHANNEL_USERNAME, row.text, { disable_web_page_preview: true });
+      await postToChannel({ text: row.text, kind: row.kind, source: "schedule" });
       stmtSchedMarkSent.run(row.id);
       incStat("schedule_sent");
       if (row.kind) incStat(`schedule_sent_${row.kind}`);
@@ -514,7 +600,6 @@ async function schedulerTick() {
   }
 }
 
-// roda a cada 20s
 setInterval(() => {
   schedulerTick().catch(() => {});
 }, 20_000);
@@ -546,10 +631,7 @@ bot.command("broadcast", async (ctx) => {
   for (let i = 0; i < subs.length; i++) {
     const chatId = subs[i].chat_id;
     try {
-      await bot.telegram.sendMessage(chatId, msg, {
-        disable_web_page_preview: true,
-        ...kb,
-      });
+      await bot.telegram.sendMessage(chatId, msg, { disable_web_page_preview: true, ...kb });
       ok++;
     } catch {
       fail++;
