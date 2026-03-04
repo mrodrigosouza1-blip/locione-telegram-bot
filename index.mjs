@@ -15,7 +15,7 @@ const DATA_DIR = process.env.RAILWAY_ENVIRONMENT ? "/data" : path.join(process.c
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, "bot.sqlite");
 
-// ===== Admin (para /broadcast) =====
+// ===== Admin (para /broadcast e /postcanal) =====
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? Number(process.env.ADMIN_CHAT_ID) : null;
 
 // ===== SQLite =====
@@ -191,6 +191,26 @@ bot.command("unsubscribe", (ctx) => {
 });
 
 bot.command("myid", (ctx) => ctx.reply(`🆔 Seu chat_id: ${ctx.chat?.id}`));
+
+// ===== Postar no canal (admin-only) =====
+// Uso: /postcanal sua mensagem aqui
+bot.command("postcanal", async (ctx) => {
+  if (!ADMIN_CHAT_ID || ctx.chat.id !== ADMIN_CHAT_ID) {
+    return ctx.reply("⛔ Comando restrito ao admin.");
+  }
+
+  const text = ctx.message?.text || "";
+  const msg = text.replace(/^\/postcanal\s*/i, "").trim();
+  if (!msg) return ctx.reply("Uso: /postcanal sua mensagem aqui");
+
+  await bot.telegram.sendMessage("@locione_app", msg, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+  });
+
+  incStat("post_canal");
+  return ctx.reply("✅ Postado no canal @locione_app.");
+});
 
 // ===== Broadcast (admin-only) com botões 1 coluna =====
 bot.command("broadcast", async (ctx) => {
