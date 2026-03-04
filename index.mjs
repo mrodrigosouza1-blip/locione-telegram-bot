@@ -119,15 +119,16 @@ async function showFinance(ctx) {
     "• Controle financeiro rápido\n" +
     "• Offline-first (dados no aparelho)\n" +
     "• Relatórios e organização\n\n" +
-    "Baixe no iOS:";
+    "🍎 *Baixar no iOS:*\n" +
+    `${LINKS.finance_ios}`;
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("🍎 iOS (App Store)", LINKS.finance_ios)],
+    [Markup.button.url("🍎 Abrir App Store (iOS)", LINKS.finance_ios)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
 }
 
 async function showOffice(ctx) {
@@ -137,15 +138,16 @@ async function showOffice(ctx) {
     "• Gestão para MEI/pequenos negócios\n" +
     "• Offline-first (dados no aparelho)\n" +
     "• Lançamentos, clientes, produtos e mais\n\n" +
-    "Baixe no iOS:";
+    "🍎 *Baixar no iOS:*\n" +
+    `${LINKS.office_ios}`;
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("🍎 iOS (App Store)", LINKS.office_ios)],
+    [Markup.button.url("🍎 Abrir App Store (iOS)", LINKS.office_ios)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
 }
 
 async function showDesk(ctx) {
@@ -155,15 +157,16 @@ async function showDesk(ctx) {
     "• App desktop offline-first\n" +
     "• Produtividade com privacidade\n" +
     "• Downloads oficiais no site\n\n" +
-    "Faça o download:";
+    "💻 *Download:*\n" +
+    `${LINKS.desk_download}`;
 
   const kb = Markup.inlineKeyboard([
-    [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
+    [Markup.button.url("💻 Abrir Download", LINKS.desk_download)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
 
-  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", ...kb, ...persistentKeyboard() });
+  return safeEditOrReply(ctx, text, { parse_mode: "Markdown", disable_web_page_preview: true, ...kb, ...persistentKeyboard() });
 }
 
 // ===== /start =====
@@ -182,12 +185,14 @@ bot.start(async (ctx) => {
   });
 });
 
-// ===== Comandos (ainda funcionam, mas usuário não precisa digitar) =====
+// ===== Comandos (ainda funcionam) =====
 bot.command("finance", (ctx) => showFinance(ctx));
 bot.command("office", (ctx) => showOffice(ctx));
 bot.command("desk", (ctx) => showDesk(ctx));
-bot.command("site", (ctx) => ctx.reply(`🌐 Site oficial: ${LINKS.site}`, { disable_web_page_preview: true }));
-bot.command("canal", (ctx) => ctx.reply(`📣 Canal: ${LINKS.canal}`));
+bot.command("site", (ctx) =>
+  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
+);
+bot.command("canal", (ctx) => ctx.reply(`📣 Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
 bot.command("stats", (ctx) => ctx.reply(getStatsText(), { parse_mode: "Markdown" }));
 
 bot.command("subscribe", (ctx) => {
@@ -212,8 +217,10 @@ bot.command("myid", (ctx) => ctx.reply(`🆔 Seu chat_id: ${ctx.chat?.id}`));
 bot.hears("📱 Finance", (ctx) => showFinance(ctx));
 bot.hears("🏢 Office", (ctx) => showOffice(ctx));
 bot.hears("💻 Desk", (ctx) => showDesk(ctx));
-bot.hears("🌐 Site", (ctx) => ctx.reply(`🌐 Site oficial: ${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() }));
-bot.hears("📣 Canal", (ctx) => ctx.reply(`📣 Canal: ${LINKS.canal}`, { ...persistentKeyboard() }));
+bot.hears("🌐 Site", (ctx) =>
+  ctx.reply(`🌐 Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
+);
+bot.hears("📣 Canal", (ctx) => ctx.reply(`📣 Canal:\n${LINKS.canal}`, { ...persistentKeyboard() }));
 bot.hears("🔔 Novidades", (ctx) => {
   const ok = addSubscriber(ctx.chat.id);
   incStat(ok ? "sub_new_keyboard" : "sub_existing_keyboard");
@@ -281,9 +288,10 @@ bot.command("broadcast", async (ctx) => {
     if (i % 25 === 0) await new Promise((r) => setTimeout(r, 1100));
   }
 
-  return ctx.reply(`✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`, {
-    ...persistentKeyboard(),
-  });
+  return ctx.reply(
+    `✅ Broadcast concluído.\n\nEnviados: ${ok}\nFalhas: ${fail}\nTotal: ${subs.length}`,
+    { ...persistentKeyboard() }
+  );
 });
 
 // ===== Botões =====
