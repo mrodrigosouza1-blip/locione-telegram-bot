@@ -509,7 +509,7 @@ bot.command("myid", (ctx) => ctx.reply(`Seu chat_id: ${ctx.chat?.id}`));
 // ADMIN
 // =========================
 bot.command("admin", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const subs = stmtSubCount.get().c;
   const now = nowRomeStr();
   const text =
@@ -540,7 +540,7 @@ bot.command("admin", (ctx) => {
 });
 
 bot.command("post", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const arg = text.replace(/^\/post\s*/i, "").trim().toLowerCase();
   if (!["finance", "office", "tools", "desk"].includes(arg)) {
@@ -553,7 +553,7 @@ bot.command("post", async (ctx) => {
 });
 
 bot.command("lancamento", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const arg = text.replace(/^\/lancamento\s*/i, "").trim().toLowerCase();
   if (!["finance", "office", "tools", "desk"].includes(arg)) {
@@ -566,7 +566,7 @@ bot.command("lancamento", async (ctx) => {
 });
 
 bot.command("postcanal", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const msg = text.replace(/^\/postcanal\s*/i, "").trim();
   if (!msg) return ctx.reply("Uso: /postcanal sua mensagem aqui");
@@ -576,7 +576,7 @@ bot.command("postcanal", async (ctx) => {
 });
 
 bot.command("pinlast", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const last = stmtChanLast.get();
   if (!last) return ctx.reply("Ainda não existe post salvo para fixar.");
   try {
@@ -592,7 +592,7 @@ bot.command("pinlast", async (ctx) => {
 });
 
 bot.command("unpinall", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   try {
     const last = stmtChanLast.get();
     const chatId = last?.channel_chat_id;
@@ -610,7 +610,7 @@ bot.command("unpinall", async (ctx) => {
 // ADMIN - App Store monitor
 // =========================
 bot.command("appslist", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const apps = appleMonitor.listTrackedApps(db);
   if (!apps.length) return ctx.reply("Nenhum app monitorado.");
   const lines = apps.map(
@@ -621,7 +621,7 @@ bot.command("appslist", (ctx) => {
 });
 
 bot.command("appcheck", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const arg = text.replace(/^\/appcheck\s*/i, "").trim().toLowerCase();
   const postToChannelFn = (msg, kind, source) => postToChannel({ text: msg, kind, source: source || "app_update" });
@@ -647,7 +647,7 @@ bot.command("appcheck", async (ctx) => {
 });
 
 bot.command("appadd", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const rest = text.replace(/^\/appadd\s*/i, "").trim();
   const parts = rest.split(/\|/).map((p) => p.trim());
@@ -670,7 +670,7 @@ bot.command("appadd", (ctx) => {
 });
 
 bot.command("apptoggle", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const slug = text.replace(/^\/apptoggle\s*/i, "").trim().toLowerCase();
   if (!slug) return ctx.reply("Uso: /apptoggle slug");
@@ -680,7 +680,7 @@ bot.command("apptoggle", (ctx) => {
 });
 
 bot.command("appupdates", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const updates = appleMonitor.getLastAppUpdates(db, 10);
   if (!updates.length) return ctx.reply("Nenhum update registrado.");
   const lines = updates.map(
@@ -691,7 +691,7 @@ bot.command("appupdates", (ctx) => {
 });
 
 bot.command("appcheckbroadcast", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const text = ctx.message?.text || "";
   const slug = text.replace(/^\/appcheckbroadcast\s*/i, "").trim().toLowerCase();
   if (!slug) return ctx.reply("Uso: /appcheckbroadcast slug");
@@ -715,7 +715,7 @@ bot.command("appcheckbroadcast", async (ctx) => {
 // SCHEDULER
 // =========================
 bot.command("agendar", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const full = ctx.message?.text || "";
   const rest = full.replace(/^\/agendar\s*/i, "").trim();
   const parts = rest.split(/\s+/);
@@ -751,7 +751,7 @@ bot.command("agendar", (ctx) => {
 });
 
 bot.command("agendados", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const rows = stmtSchedListPending.all();
   if (!rows.length) return ctx.reply("Sem posts pendentes.");
   const lines = rows.map((r) => `#${r.id} | ${r.run_at_rome} | ${r.kind || "texto"} | ${r.preview}`);
@@ -759,7 +759,7 @@ bot.command("agendados", (ctx) => {
 });
 
 bot.command("cancelar", (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
   const full = ctx.message?.text || "";
   const idStr = full.replace(/^\/cancelar\s*/i, "").trim();
   const id = Number(idStr);
@@ -825,7 +825,7 @@ async function runAppleMonitorJobSafe() {
 // BROADCAST
 // =========================
 bot.command("broadcast", async (ctx) => {
-  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  if (!isAdmin(ctx)) return;
 
   const text = ctx.message?.text || "";
   const msg = text.replace(/^\/broadcast\s*/i, "").trim();
