@@ -3,3 +3,12 @@ node_modules
 *.log
 stats.json
 subscribers.json
+
+# SQLite local / dados
+.data/
+bot.sqlite
+bot.sqlite-shm
+bot.sqlite-wal
+
+# backups / temporários
+*.save

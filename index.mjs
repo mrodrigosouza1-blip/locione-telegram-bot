@@ -796,22 +796,30 @@ setInterval(() => {
   schedulerTick().catch(() => {});
 }, 20_000);
 
-// Job de monitoramento App Store a cada 30 minutos
+// Monitoramento App Store: flag e função segura (não bloqueia o bot)
 const APPLE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const postToChannelForAppUpdate = (text, kind, source) =>
   postToChannel({ text, kind, source: source || "app_update" });
-function runAppleCheckJob() {
-  appleMonitor
-    .runAllChecks(db, {
+let appleCheckRunning = false;
+async function runAppleMonitorJobSafe() {
+  if (appleCheckRunning) {
+    console.log("[apple-check] skip (job already running)");
+    return;
+  }
+  appleCheckRunning = true;
+  try {
+    await appleMonitor.runAllChecks(db, {
       postToChannelFn: postToChannelForAppUpdate,
       sendBroadcastFn: sendBroadcastToSubscribers,
       incStatFn: incStat,
       delayMs: 2000,
-    })
-    .catch((e) => console.error("[apple-check] job error", e?.message || e));
+    });
+  } catch (e) {
+    console.error("[apple-check] job error", e?.message || e);
+  } finally {
+    appleCheckRunning = false;
+  }
 }
-setInterval(runAppleCheckJob, APPLE_CHECK_INTERVAL_MS);
-setTimeout(runAppleCheckJob, 60_000);
 
 // =========================
 // BROADCAST
@@ -910,6 +918,10 @@ bot.catch((err) => console.error("Bot error:", err));
   console.log("DB_PATH:", DB_PATH);
   await bot.launch();
   console.log("🤖 LociOne Bot rodando...");
+  console.log("[apple-check] first delayed run scheduled for 60s");
+  setTimeout(() => runAppleMonitorJobSafe().catch(console.error), 60_000);
+  console.log("[apple-check] interval scheduled for 30min");
+  setInterval(() => runAppleMonitorJobSafe().catch(console.error), APPLE_CHECK_INTERVAL_MS);
 })();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
