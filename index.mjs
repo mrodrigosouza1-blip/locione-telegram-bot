@@ -914,14 +914,23 @@ process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 bot.catch((err) => console.error("Bot error:", err));
 
 (async () => {
-  console.log("🤖 LociOne Bot iniciando...");
-  console.log("DB_PATH:", DB_PATH);
-  await bot.launch();
-  console.log("🤖 LociOne Bot rodando...");
-  console.log("[apple-check] first delayed run scheduled for 60s");
-  setTimeout(() => runAppleMonitorJobSafe().catch(console.error), 60_000);
-  console.log("[apple-check] interval scheduled for 30min");
-  setInterval(() => runAppleMonitorJobSafe().catch(console.error), APPLE_CHECK_INTERVAL_MS);
+  try {
+    console.log("🤖 LociOne Bot iniciando...");
+    console.log("DB_PATH:", DB_PATH);
+
+    console.log("Launching bot...");
+    await bot.launch();
+    console.log("🤖 LociOne Bot rodando...");
+
+    console.log("[apple-check] first delayed run scheduled for 60s");
+    setTimeout(() => runAppleMonitorJobSafe().catch(console.error), 60_000);
+
+    console.log("[apple-check] interval scheduled for 30min");
+    setInterval(() => runAppleMonitorJobSafe().catch(console.error), 30 * 60 * 1000);
+
+  } catch (err) {
+    console.error("BOOT ERROR:", err);
+  }
 })();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
