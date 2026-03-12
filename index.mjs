@@ -3,6 +3,7 @@ import "dotenv/config";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import * as appleMonitor from "./lib/apple-monitor.js";
 
 // =========================
 // ENV / CONFIG
@@ -77,7 +78,51 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_channel_posts_created
     ON channel_posts(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS tracked_apps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    country TEXT NOT NULL DEFAULT 'br',
+    store_url TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_version TEXT,
+    last_release_date TEXT,
+    last_name TEXT,
+    last_checked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_tracked_apps_active_platform
+    ON tracked_apps(is_active, platform);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tracked_apps_slug ON tracked_apps(slug);
+
+  CREATE TABLE IF NOT EXISTS app_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tracked_app_id INTEGER NOT NULL,
+    slug TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    old_version TEXT,
+    new_version TEXT,
+    old_release_date TEXT,
+    new_release_date TEXT,
+    old_name TEXT,
+    new_name TEXT,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    posted_to_channel INTEGER NOT NULL DEFAULT 0,
+    broadcast_sent INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT,
+    FOREIGN KEY(tracked_app_id) REFERENCES tracked_apps(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_updates_tracked_app_id
+    ON app_updates(tracked_app_id);
+  CREATE INDEX IF NOT EXISTS idx_app_updates_detected_at
+    ON app_updates(detected_at DESC);
 `);
+
+appleMonitor.seedTrackedApps(db);
 
 const stmtInc = db.prepare(`
   INSERT INTO stats (key, value) VALUES (?, 1)
@@ -140,6 +185,17 @@ function incStat(key) {
     stmtInc.run(key);
   } catch (e) {
     console.error("incStat error:", e);
+  }
+}
+
+/** Envia uma mensagem a todos os inscritos (para broadcast de app update). */
+async function sendBroadcastToSubscribers(text) {
+  const subs = stmtSubsAll.all();
+  for (let i = 0; i < subs.length; i++) {
+    try {
+      await bot.telegram.sendMessage(subs[i].chat_id, text, { disable_web_page_preview: true });
+    } catch (_) {}
+    if (i % 25 === 0) await new Promise((r) => setTimeout(r, 1100));
   }
 }
 function addSubscriber(chatId) {
@@ -472,7 +528,14 @@ bot.command("admin", (ctx) => {
     `- /pinlast\n` +
     `- /unpinall\n` +
     `- /broadcast texto...\n` +
-    `- /stats`;
+    `- /stats\n\n` +
+    `App Store monitor:\n` +
+    `- /appslist\n` +
+    `- /appcheck [slug]\n` +
+    `- /appadd slug|nome|appid|url\n` +
+    `- /apptoggle slug\n` +
+    `- /appupdates\n` +
+    `- /appcheckbroadcast slug`;
   return ctx.reply(text, { ...persistentKeyboard() });
 });
 
@@ -541,6 +604,111 @@ bot.command("unpinall", async (ctx) => {
     incStat("unpin_all_fail");
     return ctx.reply(`Falha ao remover pins: ${String(e?.message || e)}`);
   }
+});
+
+// =========================
+// ADMIN - App Store monitor
+// =========================
+bot.command("appslist", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const apps = appleMonitor.listTrackedApps(db);
+  if (!apps.length) return ctx.reply("Nenhum app monitorado.");
+  const lines = apps.map(
+    (a) =>
+      `${a.slug} | ${a.name} | ${a.app_id} | v${a.last_version || "?"} | ${a.is_active ? "ativo" : "inativo"}`
+  );
+  return ctx.reply("APPS MONITORADOS:\n\n" + lines.join("\n"), { ...persistentKeyboard() });
+});
+
+bot.command("appcheck", async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const text = ctx.message?.text || "";
+  const arg = text.replace(/^\/appcheck\s*/i, "").trim().toLowerCase();
+  const postToChannelFn = (msg, kind, source) => postToChannel({ text: msg, kind, source: source || "app_update" });
+  if (!arg) {
+    const result = await appleMonitor.runAllChecks(db, {
+      postToChannelFn,
+      sendBroadcastFn: null,
+      incStatFn: incStat,
+      delayMs: 1500,
+    });
+    return ctx.reply(`Check concluído. Apps checados: ${result.checked}`, { ...persistentKeyboard() });
+  }
+  const row = appleMonitor.getTrackedAppBySlug(db, arg);
+  if (!row) return ctx.reply(`App não encontrado: ${arg}`);
+  await appleMonitor.checkTrackedApp(db, row, {
+    postToChannel: true,
+    sendBroadcast: false,
+    postToChannelFn,
+    sendBroadcastFn: null,
+    incStatFn: incStat,
+  });
+  return ctx.reply(`Check concluído: ${arg}`, { ...persistentKeyboard() });
+});
+
+bot.command("appadd", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const text = ctx.message?.text || "";
+  const rest = text.replace(/^\/appadd\s*/i, "").trim();
+  const parts = rest.split(/\|/).map((p) => p.trim());
+  if (parts.length < 3) {
+    return ctx.reply("Uso: /appadd slug|nome|appid|url\nEx: /appadd tools2|Meu App|1234567890|https://apps.apple.com/br/app/...");
+  }
+  const slug = parts[0];
+  const name = parts[1];
+  const appId = parts[2];
+  const storeUrl = parts.length > 3 ? parts.slice(3).join("|").trim() : null;
+  if (!slug || !name || !appId) {
+    return ctx.reply("slug, nome e appid são obrigatórios.");
+  }
+  try {
+    appleMonitor.addTrackedApp(db, { slug, name, appId, country: "br", storeUrl: storeUrl || null });
+    return ctx.reply(`App adicionado: ${slug} (${name})`);
+  } catch (e) {
+    return ctx.reply(`Erro: ${String(e?.message || e)}`);
+  }
+});
+
+bot.command("apptoggle", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const text = ctx.message?.text || "";
+  const slug = text.replace(/^\/apptoggle\s*/i, "").trim().toLowerCase();
+  if (!slug) return ctx.reply("Uso: /apptoggle slug");
+  const newState = appleMonitor.toggleTrackedApp(db, slug);
+  if (newState === null) return ctx.reply(`App não encontrado: ${slug}`);
+  return ctx.reply(`${slug}: ${newState ? "ativado" : "desativado"}`);
+});
+
+bot.command("appupdates", (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const updates = appleMonitor.getLastAppUpdates(db, 10);
+  if (!updates.length) return ctx.reply("Nenhum update registrado.");
+  const lines = updates.map(
+    (u) =>
+      `${u.slug} ${u.old_version || "?"} -> ${u.new_version || "?"} (${u.detected_at}) post=${u.posted_to_channel} bc=${u.broadcast_sent}`
+  );
+  return ctx.reply("ÚLTIMOS UPDATES:\n\n" + lines.join("\n"), { ...persistentKeyboard() });
+});
+
+bot.command("appcheckbroadcast", async (ctx) => {
+  if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
+  const text = ctx.message?.text || "";
+  const slug = text.replace(/^\/appcheckbroadcast\s*/i, "").trim().toLowerCase();
+  if (!slug) return ctx.reply("Uso: /appcheckbroadcast slug");
+  const row = appleMonitor.getTrackedAppBySlug(db, slug);
+  if (!row) return ctx.reply(`App não encontrado: ${slug}`);
+  const postToChannelFn = (msg, kind, source) => postToChannel({ text: msg, kind, source: source || "app_update" });
+  const result = await appleMonitor.checkTrackedApp(db, row, {
+    postToChannel: true,
+    sendBroadcast: true,
+    postToChannelFn,
+    sendBroadcastFn: sendBroadcastToSubscribers,
+    incStatFn: incStat,
+  });
+  return ctx.reply(
+    `Check com broadcast concluído: ${slug}${result.updated ? " (update detectado)" : ""}`,
+    { ...persistentKeyboard() }
+  );
 });
 
 // =========================
@@ -627,6 +795,23 @@ async function schedulerTick() {
 setInterval(() => {
   schedulerTick().catch(() => {});
 }, 20_000);
+
+// Job de monitoramento App Store a cada 30 minutos
+const APPLE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const postToChannelForAppUpdate = (text, kind, source) =>
+  postToChannel({ text, kind, source: source || "app_update" });
+function runAppleCheckJob() {
+  appleMonitor
+    .runAllChecks(db, {
+      postToChannelFn: postToChannelForAppUpdate,
+      sendBroadcastFn: sendBroadcastToSubscribers,
+      incStatFn: incStat,
+      delayMs: 2000,
+    })
+    .catch((e) => console.error("[apple-check] job error", e?.message || e));
+}
+setInterval(runAppleCheckJob, APPLE_CHECK_INTERVAL_MS);
+setTimeout(runAppleCheckJob, 60_000);
 
 // =========================
 // BROADCAST
