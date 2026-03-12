@@ -26,7 +26,8 @@ const DB_PATH = path.join(DATA_DIR, "bot.sqlite");
 // Links
 const LINKS = {
   finance_ios: "https://apps.apple.com/it/app/locione-finance/id6758838032",
-  office_ios: "https://apps.apple.com/br/app/locione-office/id6759913632",
+  office_ios: "httpps.apple.com/br/app/locione-office/id6759913632",
+  tools_ios: "https://apps.apple.com/br/app/locitools/id6760295235",
   desk_download:
     "https://locione.com/download?utm_source=telegram&utm_medium=bot&utm_campaign=locione_desk",
   site: "https://locione.com?utm_source=telegram&utm_medium=bot&utm_campaign=locione_site",
@@ -52,10 +53,10 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS scheduled_posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_at_rome TEXT NOT NULL,      -- "YYYY-MM-DD HH:MM" (Rome local)
-    kind TEXT,                      -- finance|office|desk|null
+    run_at_rome TEXT NOT NULL,
+    kind TEXT,
     text TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending', -- pending|sent|canceled|failed
+    status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     sent_at TEXT,
     error TEXT
@@ -70,7 +71,7 @@ db.exec(`
     channel_chat_id INTEGER,
     message_id INTEGER NOT NULL,
     kind TEXT,
-    source TEXT NOT NULL, -- post|lancamento|postcanal|schedule
+    source TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -152,8 +153,6 @@ function removeSubscriber(chatId) {
 function isAdmin(ctx) {
   return !!ADMIN_CHAT_ID && ctx.chat?.id === ADMIN_CHAT_ID;
 }
-
-// /stats SEM Markdown (evita bug com "_" e parsing)
 function getStatsPlainText() {
   const rows = stmtGetAllStats.all();
   const subs = stmtSubCount.get().c;
@@ -192,12 +191,13 @@ function isValidRunAtRome(s) {
 // =========================
 const bot = new Telegraf(BOT_TOKEN);
 
-// Teclado fixo (tap-only)
+// Teclado fixo
 function persistentKeyboard() {
   return Markup.keyboard([
     ["📱 Finance", "🏢 Office"],
-    ["💻 Desk", "🔔 Novidades"],
-    ["🌐 Site", "📣 Canal"],
+    ["🛠️ Tools", "💻 Desk"],
+    ["🔔 Novidades", "🌐 Site"],
+    ["📣 Canal"],
   ])
     .resize()
     .persistent();
@@ -208,14 +208,13 @@ function mainMenu() {
   return Markup.inlineKeyboard([
     [Markup.button.callback("📱 LociOne Finance", "app_finance")],
     [Markup.button.callback("🏢 LociOne Office", "app_office")],
+    [Markup.button.callback("🛠️ LociTools", "app_tools")],
     [Markup.button.callback("💻 LociOne Desk", "app_desk")],
     [Markup.button.url("🌐 Site oficial", LINKS.site)],
     [Markup.button.url("📣 Canal", LINKS.canal)],
-    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
-  ]);
+    [Markup.button.callback("🔔 R ]);
 }
 
-// Evita 400 "message can't be edited"
 async function safeEditOrReply(ctx, text, extra) {
   try {
     if (ctx.update?.callback_query) {
@@ -227,7 +226,7 @@ async function safeEditOrReply(ctx, text, extra) {
 }
 
 // =========================
-// SCREENS (links sempre no texto)
+// SCREENS
 // =========================
 async function showFinance(ctx) {
   incStat("open_finance");
@@ -254,8 +253,7 @@ async function showFinance(ctx) {
 }
 
 async function showOffice(ctx) {
-  incStat("open_office");
-  const text =
+  in  const text =
     "*LociOne Office 🏢*\n\n" +
     "• Gestão para MEI/pequenos negócios\n" +
     "• Offline-first (dados no aparelho)\n" +
@@ -265,6 +263,30 @@ async function showOffice(ctx) {
 
   const kb = Markup.inlineKeyboard([
     [Markup.button.url("🍎 Abrir App Store (iOS)", LINKS.office_ios)],
+    [Markup.button.callback("🔔 Receber novidades", "sub_on")],
+    [Markup.button.callback("⬅️ Voltar", "back")],
+  ]);
+
+  return safeEditOrReply(ctx, text, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    ...kb,
+    ...persistentKeyboard(),
+  });
+}
+
+async function showTools(ctx) {
+  incStat("open_tools");
+  const text =
+    "*LociTools 🛠️*\n\n" +
+    "• Ferramentas úteis para o dia a dia\n" +
+    "• Interface simples e prática\n" +
+    "• Acesso rápido a utilidades no iPhone\n\n" +
+    "🍎 *Baixar no iOS:*\n" +
+    `${LINKS.tools_ios}`;
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.url(ols_ios)],
     [Markup.button.callback("🔔 Receber novidades", "sub_on")],
     [Markup.button.callback("⬅️ Voltar", "back")],
   ]);
@@ -302,14 +324,12 @@ async function showDesk(ctx) {
 }
 
 // =========================
-// HELPERS: postar no canal + salvar message_id + pin opcional
-// =========================
-async function postToChannel({ text, kind = null, source = "post" }) {
+// HELPERS: canal
+// ==========nction postToChannel({ text, kind = null, source = "post" }) {
   const res = await bot.telegram.sendMessage(CHANNEL_USERNAME, text, {
     disable_web_page_preview: true,
   });
 
-  // res.chat.id e res.message_id vêm aqui
   try {
     stmtChanPostInsert.run(CHANNEL_USERNAME, res.chat?.id || null, res.message_id, kind, source);
   } catch (e) {
@@ -337,20 +357,29 @@ function templateFor(kind) {
       "Controle financeiro offline-first.\n\n" +
       "Baixar no iOS:\n" +
       LINKS.finance_ios +
-      "\n\n" +
-      "Canal:\n" +
+      "\n\nCanal:\n" +
       LINKS.canal
     );
   }
   if (kind === "office") {
     return (
-      "🚀 Lançamento LociOne\n\n" +
+      "🚀 Lançamento LociO+
       "🏢 LociOne Office (iOS)\n" +
       "Gestão simples para MEI/pequenos negócios.\n\n" +
       "Baixar no iOS:\n" +
       LINKS.office_ios +
-      "\n\n" +
-      "Canal:\n" +
+      "\n\nCanal:\n" +
+      LINKS.canal
+    );
+  }
+  if (kind === "tools") {
+    return (
+      "🚀 Lançamento LociOne\n\n" +
+      "🛠️ LociTools (iOS)\n" +
+      "Ferramentas úteis para o dia a dia.\n\n" +
+      "Baixar no iOS:\n" +
+      LINKS.tools_ios +
+      "\n\nCanal:\n" +
       LINKS.canal
     );
   }
@@ -361,8 +390,7 @@ function templateFor(kind) {
       "Produtividade com foco em privacidade.\n\n" +
       "Download:\n" +
       LINKS.desk_download +
-      "\n\n" +
-      "Canal:\n" +
+      "\n\nCanal:\n" +
       LINKS.canal
     );
   }
@@ -370,13 +398,14 @@ function templateFor(kind) {
 }
 
 // =========================
-// /start
+// START
 // =========================
 bot.start(async (ctx) => {
   incStat("start");
   const payload = (ctx.startPayload || "").trim();
   if (payload === "finance") return showFinance(ctx);
   if (payload === "office") return showOffice(ctx);
+ "tools") return showTools(ctx);
   if (payload === "desk") return showDesk(ctx);
 
   return ctx.reply("👋 *Bem-vindo à LociOne!*\n\nEscolha o app:", {
@@ -391,6 +420,7 @@ bot.start(async (ctx) => {
 // =========================
 bot.command("finance", (ctx) => showFinance(ctx));
 bot.command("office", (ctx) => showOffice(ctx));
+bot.command("tools", (ctx) => showTools(ctx));
 bot.command("desk", (ctx) => showDesk(ctx));
 bot.command("site", (ctx) =>
   ctx.reply(`Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
@@ -404,7 +434,7 @@ bot.command("stats", (ctx) => {
 
 bot.command("subscribe", (ctx) => {
   const ok = addSubscriber(ctx.chat.id);
-  incStat(ok ? "sub_new_cmd" : "sub_existing_cmd");
+  incStat(ok ? "sub_new_cmd" : "sub_exing_cmd");
   return ctx.reply(ok ? "✅ Inscrito nas novidades." : "✅ Você já está inscrito.", { ...persistentKeyboard() });
 });
 
@@ -417,7 +447,7 @@ bot.command("unsubscribe", (ctx) => {
 bot.command("myid", (ctx) => ctx.reply(`Seu chat_id: ${ctx.chat?.id}`));
 
 // =========================
-// ADMIN: /admin
+// ADMIN
 // =========================
 bot.command("admin", (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
@@ -430,9 +460,9 @@ bot.command("admin", (ctx) => {
     `pin_auto: ${PIN_AUTO ? "ON" : "OFF"}\n\n` +
     `comandos:\n` +
     `- /postcanal texto...\n` +
-    `- /post finance|office|desk\n` +
-    `- /lancamento finance|office|desk\n` +
-    `- /agendar YYYY-MM-DD HH:MM finance|office|desk\n` +
+    `- /post finance|office|tools|desk\n` +
+    `- /lancamento finance|office|tools|desk\n` +
+    `- /agendar YYYY-MM-DD HH:MM finance|offn` +
     `- /agendar YYYY-MM-DD HH:MM seu texto livre...\n` +
     `- /agendados\n` +
     `- /cancelar ID\n` +
@@ -443,15 +473,12 @@ bot.command("admin", (ctx) => {
   return ctx.reply(text, { ...persistentKeyboard() });
 });
 
-// =========================
-// ADMIN: postar no canal
-// =========================
 bot.command("post", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   const text = ctx.message?.text || "";
   const arg = text.replace(/^\/post\s*/i, "").trim().toLowerCase();
-  if (!["finance", "office", "desk"].includes(arg)) {
-    return ctx.reply("Uso: /post finance | office | desk");
+  if (!["finance", "office", "tools", "desk"].includes(arg)) {
+    return ctx.reply("Uso: /post finance | office | tools | desk");
   }
   const msg = templateFor(arg);
   await postToChannel({ text: msg, kind: arg, source: "post" });
@@ -463,8 +490,8 @@ bot.command("lancamento", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   const text = ctx.message?.text || "";
   const arg = text.replace(/^\/lancamento\s*/i, "").trim().toLowerCase();
-  if (!["finance", "office", "desk"].includes(arg)) {
-    return ctx.reply("Uso: /lancamento finance | office | desk");
+  if (!["finance", "officeols", "desk"].includes(arg)) {
+    return ctx.reply("Uso: /lancamento finance | office | tools | desk");
   }
   const msg = templateFor(arg);
   await postToChannel({ text: msg, kind: arg, source: "lancamento" });
@@ -482,19 +509,13 @@ bot.command("postcanal", async (ctx) => {
   return ctx.reply(`✅ Postado no canal ${CHANNEL_USERNAME}.`);
 });
 
-// =========================
-// ADMIN: pin / unpin
-// =========================
 bot.command("pinlast", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
-
   const last = stmtChanLast.get();
   if (!last) return ctx.reply("Ainda não existe post salvo para fixar.");
-
   try {
     const chatId = last.channel_chat_id;
-    if (!chatId) return ctx.reply("Não tenho channel_chat_id salvo ainda. Poste novamente via bot e tente /pinlast.");
-
+    if (!chatId) retury("Sem channel_chat_id salvo ainda. Poste novamente via bot.");
     await bot.telegram.pinChatMessage(chatId, last.message_id, { disable_notification: true });
     incStat("pin_last_ok");
     return ctx.reply(`📌 Fixado o último post (msg_id: ${last.message_id}).`);
@@ -507,10 +528,9 @@ bot.command("pinlast", async (ctx) => {
 bot.command("unpinall", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
   try {
-    // precisamos do chat_id do canal; tenta usar o último salvo
     const last = stmtChanLast.get();
     const chatId = last?.channel_chat_id;
-    if (!chatId) return ctx.reply("Sem channel_chat_id salvo. Poste algo no canal via bot e tente de novo.");
+    if (!chatId) return ctx.reply("Sem channel_chat_id salvo. Poste algo no canal via bot primeiro.");
     await bot.telegram.unpinAllChatMessages(chatId);
     incStat("unpin_all_ok");
     return ctx.reply("🧷 Removi todos os pins do canal.");
@@ -522,20 +542,20 @@ bot.command("unpinall", async (ctx) => {
 
 // =========================
 // SCHEDULER
-// =========================
-bot.command("agendar", (ctx) => {
+// =====================t.command("agendar", (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
-
   const full = ctx.message?.text || "";
   const rest = full.replace(/^\/agendar\s*/i, "").trim();
   const parts = rest.split(/\s+/);
+
   if (parts.length < 3) {
-    return ctx.reply("Uso:\n/agendar YYYY-MM-DD HH:MM finance|office|desk\nou\n/agendar YYYY-MM-DD HH:MM seu texto...");
+    return ctx.reply("Uso:\n/agendar YYYY-MM-DD HH:MM finance|office|tools|desk\nou\n/agendar YYYY-MM-DD HH:MM seu texto...");
   }
 
   const date = parts[0];
   const time = parts[1];
   const runAt = `${date} ${time}`;
+
   if (!isValidRunAtRome(runAt)) {
     return ctx.reply("Formato inválido. Use: YYYY-MM-DD HH:MM (ex: 2026-03-05 09:30)");
   }
@@ -545,7 +565,7 @@ bot.command("agendar", (ctx) => {
   let msg = null;
 
   const lowerTail = tail.toLowerCase().trim();
-  if (["finance", "office", "desk"].includes(lowerTail)) {
+  if (["finance", "office", "tools", "desk"].includes(lowerTail)) {
     kind = lowerTail;
     msg = templateFor(kind);
   } else {
@@ -555,7 +575,7 @@ bot.command("agendar", (ctx) => {
   stmtSchedInsert.run(runAt, kind, msg);
   incStat("schedule_create");
 
-  return ctx.reply(`✅ Agendado para (Roma): ${runAt}\n${kind ? `tipo: ${kind}` : "tipo: texto livre"}`);
+  return ctx.reply(`✅ Agendado para (Roma): ${runAt}\n${kind ? `tipo: ${kin "tipo: texto livre"}`);
 });
 
 bot.command("agendados", (ctx) => {
@@ -571,19 +591,19 @@ bot.command("cancelar", (ctx) => {
   const full = ctx.message?.text || "";
   const idStr = full.replace(/^\/cancelar\s*/i, "").trim();
   const id = Number(idStr);
-  if (!Number.isFinite(id) || id <= 0) return ctx.reply("Uso: /cancelar ID (ex: /cancelar 12)");
+  if (!Number.isFinite(id) || id <= 0) return ctx.reply("Uso: /cancelar ID");
   const res = stmtSchedCancel.run(id);
   if (res.changes > 0) {
     incStat("schedule_cancel");
     return ctx.reply(`✅ Agendamento #${id} cancelado.`);
   }
-  return ctx.reply(`Não encontrei #${id} pendente (ou já foi enviado/cancelado).`);
+  return ctx.reply(`Não encontrei #${id} pendente.`);
 });
 
 async function schedulerTick() {
   const now = nowRomeStr();
   const due = stmtSchedPendingDue.all(now);
-  if (!due.length) return;
+  if (ngth) return;
 
   for (const row of due) {
     try {
@@ -605,7 +625,7 @@ setInterval(() => {
 }, 20_000);
 
 // =========================
-// BROADCAST (admin)
+// BROADCAST
 // =========================
 bot.command("broadcast", async (ctx) => {
   if (!isAdmin(ctx)) return ctx.reply("⛔ Admin only.");
@@ -620,9 +640,10 @@ bot.command("broadcast", async (ctx) => {
   let ok = 0;
   let fail = 0;
 
-  const kb = Markup.inlineKeyboard([
+  const kb = Markup.inlineKeyboa([
     [Markup.button.url("🍎 iOS (Finance)", LINKS.finance_ios)],
     [Markup.button.url("🏢 iOS (Office)", LINKS.office_ios)],
+    [Markup.button.url("🛠️ iOS (LociTools)", LINKS.tools_ios)],
     [Markup.button.url("💻 Desk (Download)", LINKS.desk_download)],
     [Markup.button.url("🌐 Site", LINKS.site)],
     [Markup.button.url("📣 Canal", LINKS.canal)],
@@ -643,11 +664,11 @@ bot.command("broadcast", async (ctx) => {
 });
 
 // =========================
-// TAP-ONLY (hears)
+// TAP-ONLY
 // =========================
 bot.hears("📱 Finance", (ctx) => showFinance(ctx));
 bot.hears("🏢 Office", (ctx) => showOffice(ctx));
-bot.hears("💻 Desk", (ctx) => showDesk(ctx));
+bot.hears("🛠️ Tools", (ctx) => showTools(ctx));x) => showDesk(ctx));
 bot.hears("🌐 Site", (ctx) =>
   ctx.reply(`Site oficial:\n${LINKS.site}`, { disable_web_page_preview: true, ...persistentKeyboard() })
 );
@@ -663,15 +684,14 @@ bot.hears("🔔 Novidades", (ctx) => {
 // =========================
 bot.action("app_finance", (ctx) => showFinance(ctx));
 bot.action("app_office", (ctx) => showOffice(ctx));
+bot.action("app_tools", (ctx) => showTools(ctx));
 bot.action("app_desk", (ctx) => showDesk(ctx));
 
 bot.action("sub_on", async (ctx) => {
   const ok = addSubscriber(ctx.chat.id);
   incStat(ok ? "sub_new" : "sub_existing");
   try {
-    await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅");
-  } catch {}
-  return safeEditOrReply(
+    await ctx.answerCbQuery(ok ? "Inscrito ✅" : "Você já está inscrito ✅");rn safeEditOrReply(
     ctx,
     ok ? "✅ Pronto! Você vai receber novidades da LociOne." : "ℹ️ Você já estava inscrito.",
     { ...mainMenu(), ...persistentKeyboard() }
@@ -702,3 +722,5 @@ bot.catch((err) => console.error("Bot error:", err));
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
+
+
